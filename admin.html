@@ -1,0 +1,870 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>行きたい場所の集計</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.css">
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/MarkerCluster.Default.css">
+<style>
+  :root {
+    --bg: #f6f7f9; --card: #fff; --text: #1d2330; --muted: #667085;
+    --accent: #1f6feb; --accent-weak: #e8f0fe; --border: #d9dee7; --err: #c62828; --gold: #b7791f;
+    --pin: #e8590c; --short: #1f6feb; --long: #d9480f;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #12151b; --card: #1b1f27; --text: #e6e9ef; --muted: #9aa4b2;
+      --accent: #5b9bff; --accent-weak: #1e2a40; --border: #2e3440; --err: #ff6b6b; --gold: #f0b84a;
+      --pin: #ff8a3d; --short: #5b9bff; --long: #ff8a3d;
+    }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--text);
+    font-family: system-ui, -apple-system, "Hiragino Sans", "Noto Sans JP", sans-serif; line-height: 1.5; font-size: 14px; }
+  header { padding: 12px 16px; border-bottom: 1px solid var(--border); background: var(--card); }
+  header h1 { margin: 0; font-size: 1.15rem; }
+  .layout { display: grid; grid-template-columns: 400px 1fr; height: calc(100vh - 50px); }
+  @media (max-width: 900px) { .layout { grid-template-columns: 1fr; height: auto; } .mapwrap { height: 70vh; } }
+  aside { overflow-y: auto; padding: 12px; border-right: 1px solid var(--border); }
+  .mapwrap { position: relative; height: 100%; min-height: 400px; }
+  #map { position: absolute; inset: 0; }
+  section { background: var(--card); border: 1px solid var(--border); border-radius: 10px; padding: 12px; margin-bottom: 12px; }
+  section h2 { font-size: .95rem; margin: 0 0 8px; }
+  input[type=text], input[type=password], select { font: inherit; padding: 6px 8px; border-radius: 6px;
+    border: 1px solid var(--border); background: var(--bg); color: var(--text); min-width: 0; }
+  input.wide { width: 100%; }
+  button { font: inherit; padding: 6px 12px; border-radius: 6px; border: 1px solid var(--accent);
+    background: var(--accent); color: #fff; cursor: pointer; }
+  button.sub { background: transparent; color: var(--accent); }
+  button:disabled { opacity: .5; cursor: default; }
+  .row { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; margin-bottom: 6px; }
+  .row > input { flex: 1; }
+  .muted { color: var(--muted); font-size: .85em; }
+  .err { color: var(--err); }
+  .res { display: block; width: 100%; text-align: left; background: var(--bg); color: var(--text); border-color: var(--border); margin-top: 4px; }
+  .res small { display: block; color: var(--muted); }
+  .item { display: flex; gap: 10px; border: 1px solid var(--border); border-radius: 8px; padding: 8px; margin-bottom: 6px; cursor: pointer; }
+  .item.on { border-color: var(--accent); background: var(--accent-weak); }
+  .item img, .item .noimg { width: 64px; height: 64px; object-fit: cover; border-radius: 6px; flex: none; background: var(--bg); }
+  .item .body { flex: 1; min-width: 0; }
+  .item .nm { font-weight: 700; font-size: .98rem; overflow-wrap: anywhere; }
+  .item .rk { color: var(--gold); font-weight: 700; margin-right: 4px; }
+  .item .st { color: var(--muted); font-size: .82rem; }
+  .badge { display: inline-block; background: var(--pin); color: #fff; border-radius: 10px; padding: 0 8px; font-size: .78rem; font-weight: 700; margin-left: 4px; vertical-align: 1px; }
+  .time { font-weight: 700; }
+  .tabs { display: flex; gap: 4px; margin-bottom: 8px; flex-wrap: wrap; }
+  .tabs button { background: transparent; color: var(--text); border-color: var(--border); padding: 4px 10px; }
+  .tabs button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+  .hidden { display: none !important; }
+  /* 詳細パネル（地図の右上に重ねる） */
+  #detail { position: absolute; top: 10px; right: 10px; bottom: 10px; width: 380px; max-width: calc(100% - 20px); z-index: 1000;
+    background: var(--card); border: 1px solid var(--border); border-radius: 10px; box-shadow: 0 4px 18px rgba(0,0,0,.25);
+    overflow-y: auto; padding: 14px; }
+  @media (max-width: 900px) { #detail { position: static; width: auto; max-width: none; box-shadow: none; margin: 12px; } }
+  #detail .close { float: right; background: transparent; color: var(--muted); border-color: var(--border); padding: 2px 10px; }
+  #detail h3 { margin: 0 0 4px; font-size: 1.1rem; overflow-wrap: anywhere; }
+  .route { background: var(--bg); border-radius: 8px; padding: 10px; margin: 10px 0; }
+  .route .big { font-size: 1.25rem; font-weight: 700; }
+  .route table { width: 100%; border-collapse: collapse; font-size: .82rem; margin-top: 6px; }
+  .route td { padding: 2px 4px; border-top: 1px solid var(--border); }
+  .route td.num { text-align: right; white-space: nowrap; }
+  .sw { display: inline-block; width: 14px; height: 4px; border-radius: 2px; vertical-align: 3px; margin-right: 4px; }
+  .entry { border-top: 1px solid var(--border); padding-top: 10px; margin-top: 10px; }
+  .entry img { width: 100%; max-height: 300px; object-fit: contain; border-radius: 8px; background: var(--bg); cursor: zoom-in; }
+  .entry .who { font-weight: 700; }
+  .entry .desc { white-space: pre-wrap; overflow-wrap: anywhere; margin: 6px 0; }
+  .pin { min-width: 26px; height: 26px; padding: 0 6px; border-radius: 13px; background: var(--pin); color: #fff; border: 2px solid #fff;
+    font-weight: 700; font-size: 12px; line-height: 22px; text-align: center; box-shadow: 0 1px 4px rgba(0,0,0,.45); }
+  .pin.on { background: var(--accent); transform: scale(1.2); }
+  .origin-pin { width: 18px; height: 18px; background: #111; border: 3px solid #fff; border-radius: 3px; box-shadow: 0 1px 4px rgba(0,0,0,.5); }
+  .marker-cluster div { background: var(--pin) !important; color: #fff; font-weight: 700; }
+  .marker-cluster { background: rgba(232, 89, 12, .3) !important; }
+  #zoom { position: fixed; inset: 0; background: rgba(0,0,0,.85); z-index: 2000; display: flex; align-items: center; justify-content: center; cursor: zoom-out; }
+  #zoom img { max-width: 95vw; max-height: 95vh; }
+  .bars { margin-bottom: 10px; }
+  .bar { display: grid; grid-template-columns: 9em 1fr 3.2em; gap: 6px; align-items: center; padding: 3px 4px; border-radius: 6px; cursor: pointer; font-size: .85rem; }
+  .bar:hover { background: var(--bg); }
+  .bar.on { background: var(--accent-weak); }
+  .bar .lb { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .bar .tr { height: 12px; background: var(--bg); border-radius: 6px; overflow: hidden; }
+  .bar .fl { height: 100%; background: var(--accent); border-radius: 6px; }
+  .bar .ct { text-align: right; font-weight: 700; }
+  .wish { border-bottom: 1px solid var(--border); padding: 8px 2px; }
+  .wish:last-child { border-bottom: 0; }
+  .wish .who { font-weight: 700; }
+  .wish .txt { white-space: pre-wrap; overflow-wrap: anywhere; margin: 2px 0; }
+  .tag { display: inline-block; border: 1px solid var(--border); border-radius: 10px; padding: 0 7px; font-size: .75rem; color: var(--muted); margin: 2px 4px 0 0; }
+  .tag.mode { border-color: var(--accent); color: var(--accent); }
+  .linkish { color: var(--accent); cursor: pointer; text-decoration: underline; }
+  .ai-sum { white-space: pre-wrap; background: var(--bg); border-radius: 8px; padding: 10px; margin: 8px 0; }
+  .ai-group { border-left: 3px solid var(--accent); padding: 2px 0 2px 8px; margin: 8px 0; }
+  .ai-group .voice { color: var(--muted); font-size: .85rem; }
+  .cand-card { border: 1px solid var(--border); border-radius: 8px; padding: 8px 10px; margin-bottom: 6px; cursor: pointer; }
+  .cand-card.on { border-color: #7c3aed; background: rgba(124, 58, 237, .08); }
+  .cand-card .nm { font-weight: 700; }
+  .cand-pin { width: 28px; height: 28px; border-radius: 50%; background: #7c3aed; color: #fff; border: 2px solid #fff; text-align: center;
+    line-height: 24px; font-weight: 700; box-shadow: 0 1px 4px rgba(0,0,0,.45); }
+  .cand-pin.on { transform: scale(1.25); }
+</style>
+</head>
+<body>
+<header><h1>行きたい場所の集計（幹事用）</h1></header>
+<div class="layout">
+<aside>
+  <section>
+    <h2>1. 回答を読み込む</h2>
+    <div class="row"><input type="text" id="gasUrl" class="wide" placeholder="GAS の URL（config.js の値が初期値）"></div>
+    <div class="row">
+      <input type="password" id="adminKey" placeholder="合言葉（ADMIN_KEY）">
+      <button id="loadBtn">読み込む</button>
+    </div>
+    <div class="row">
+      <button class="sub" id="demoBtn">お試しデータ</button>
+      <span class="muted">設定前の動作確認用</span>
+    </div>
+    <div id="loadMsg" class="muted"></div>
+  </section>
+
+  <section>
+    <h2>2. 出発地点</h2>
+    <div class="row">
+      <input type="text" id="oq" placeholder="出発地点を検索（例：大宮駅）">
+      <button id="osearchBtn">検索</button>
+    </div>
+    <div class="row">
+      <button class="sub" id="opickBtn">地図をクリックして決める</button>
+    </div>
+    <div id="oresults"></div>
+    <div id="originMsg" class="muted">まだ決まっていません。</div>
+    <div class="row" style="margin-top:6px">
+      <button id="allRouteBtn" disabled>全スポットの所要時間を計算</button>
+    </div>
+    <div id="routeMsg" class="muted">時間は渋滞なしの乗用車・高速道路ありで、候補ルートの最短〜最長です。</div>
+  </section>
+
+  <section>
+    <h2>3. 回答を見る <span id="count" class="muted"></span></h2>
+    <div class="tabs" id="viewTabs">
+      <button data-v="ai" class="on">AIまとめ</button>
+      <button data-v="wish">したいこと</button>
+      <button data-v="place">場所</button>
+    </div>
+
+    <div id="view-ai">
+      <div class="row">
+        <span class="muted">片道の目安</span>
+        <select id="hours">
+          <option value="1.5">1時間半まで</option>
+          <option value="2">2時間まで</option>
+          <option value="2.5" selected>2時間半まで</option>
+          <option value="3">3時間まで</option>
+        </select>
+        <button id="aiBtn" disabled>AIでまとめる</button>
+      </div>
+      <div id="aiMsg" class="muted">回答を読み込んでから押してください。全員の「したいこと」と場所をGeminiに渡し、要約と行き先の候補を出します（名前は渡しません）。</div>
+      <div id="aiOut"></div>
+    </div>
+
+    <div id="view-wish" class="hidden">
+      <div class="muted" style="margin-bottom:4px">ジャンルを押すと、その回答だけに絞れます。</div>
+      <div id="genreBars" class="bars"></div>
+      <div id="wishList"><div class="muted">回答を読み込むと表示されます。</div></div>
+    </div>
+
+    <div id="view-place" class="hidden">
+    <div class="tabs" id="sortTabs">
+      <button data-k="popular" class="on">人気順</button>
+      <button data-k="near">近い順</button>
+      <button data-k="new">新しい順</button>
+    </div>
+    <div class="muted" style="margin-bottom:6px">同じ施設（だいたい150m以内で同じ名前）は1つにまとめて人数を出しています。</div>
+    <div id="list"><div class="muted">回答を読み込むと表示されます。</div></div>
+    </div>
+  </section>
+</aside>
+<div class="mapwrap">
+  <div id="map"></div>
+  <div id="detail" class="hidden"></div>
+</div>
+</div>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/leaflet.markercluster/1.5.3/leaflet.markercluster.js"></script>
+<script src="config.js"></script>
+<script>
+(function () {
+  const cfg = window.BS_CONFIG || {};
+  const $ = (id) => document.getElementById(id);
+
+  // ---- 小さな道具 ----
+  function storageGet(k) { try { return localStorage.getItem(k); } catch (e) { return null; } }
+  function storageSet(k, v) { try { localStorage.setItem(k, v); } catch (e) { /* 保存できなくても続ける */ } }
+  function escapeHtml(s) {
+    return String(s == null ? "" : s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+  }
+  let seq = 0;
+  function jsonp(url, params, timeoutMs) {
+    return new Promise((resolve, reject) => {
+      const cb = "__bs_cb" + Date.now().toString(36) + (seq++);
+      const q = new URLSearchParams(params);
+      q.set("callback", cb);
+      const script = document.createElement("script");
+      let done = false;
+      const cleanup = () => { done = true; try { delete window[cb]; } catch (e) { window[cb] = undefined; } script.remove(); };
+      const timer = setTimeout(() => { if (!done) { cleanup(); reject(new Error("通信がタイムアウトしました")); } }, timeoutMs || 30000);
+      window[cb] = (data) => { clearTimeout(timer); cleanup(); resolve(data); };
+      script.onerror = () => { clearTimeout(timer); if (!done) { cleanup(); reject(new Error("通信に失敗しました")); } };
+      script.src = url + (url.includes("?") ? "&" : "?") + q.toString();
+      document.head.appendChild(script);
+    });
+  }
+  function haversine(lat1, lng1, lat2, lng2) {
+    const R = 6371, toR = Math.PI / 180;
+    const dLat = (lat2 - lat1) * toR, dLng = (lng2 - lng1) * toR;
+    const a = Math.sin(dLat / 2) ** 2 + Math.cos(lat1 * toR) * Math.cos(lat2 * toR) * Math.sin(dLng / 2) ** 2;
+    return 2 * R * Math.asin(Math.min(1, Math.sqrt(a)));
+  }
+  function fmtDur(sec) {
+    const m = Math.round(sec / 60);
+    if (m < 60) return m + "分";
+    return Math.floor(m / 60) + "時間" + (m % 60 ? (m % 60) + "分" : "");
+  }
+  function fmtKm(m) { return (m / 1000 >= 100 ? Math.round(m / 1000) : (m / 1000).toFixed(1)) + "km"; }
+  function fmtDate(iso) {
+    const d = new Date(iso);
+    if (isNaN(d)) return "";
+    return (d.getMonth() + 1) + "/" + d.getDate() + " " + d.getHours() + ":" + String(d.getMinutes()).padStart(2, "0");
+  }
+  // Google の経路線（encoded polyline）を座標の列に戻す
+  function decodePolyline(str) {
+    const pts = [];
+    let i = 0, lat = 0, lng = 0;
+    while (i < str.length) {
+      for (const k of [0, 1]) {
+        let shift = 0, result = 0, b;
+        do { b = str.charCodeAt(i++) - 63; result |= (b & 31) << shift; shift += 5; } while (b >= 32);
+        const v = (result & 1) ? ~(result >> 1) : (result >> 1);
+        if (k === 0) lat += v; else lng += v;
+      }
+      pts.push([lat / 1e5, lng / 1e5]);
+    }
+    return pts;
+  }
+
+  // ---- 地図 ----
+  const map = L.map("map");
+  const gsiAttr = '<a href="https://maps.gsi.go.jp/development/ichiran.html" target="_blank">地理院タイル</a>';
+  const std = L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/std/{z}/{x}/{y}.png", { maxZoom: 18, attribution: gsiAttr }).addTo(map);
+  const pale = L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/pale/{z}/{x}/{y}.png", { maxZoom: 18, attribution: gsiAttr });
+  const photo = L.tileLayer("https://cyberjapandata.gsi.go.jp/xyz/seamlessphoto/{z}/{x}/{y}.jpg", { maxZoom: 18, attribution: gsiAttr });
+  L.control.layers({ "地図": std, "淡色": pale, "航空写真": photo }, null, { position: "topleft" }).addTo(map);
+  map.fitBounds([[34.85, 138.55], [37.15, 140.95]]);
+  const cluster = L.markerClusterGroup({
+    maxClusterRadius: 50, showCoverageOnHover: false, disableClusteringAtZoom: 15,
+    // まとまりの数字は「スポットの件数」の合計にする
+    iconCreateFunction: (c) => {
+      const n = c.getAllChildMarkers().reduce((a, m) => a + (m.options.count || 1), 0);
+      const size = n < 10 ? "small" : (n < 30 ? "medium" : "large");
+      return L.divIcon({ html: "<div><span>" + n + "</span></div>", className: "marker-cluster marker-cluster-" + size, iconSize: L.point(40, 40) });
+    }
+  }).addTo(map);
+  const routeLayer = L.layerGroup().addTo(map);
+
+  // ---- 状態 ----
+  let answers = [];     // 読み込んだ回答すべて
+  let spots = [];       // そのうち場所があるもの
+  let genreFilter = null;
+  let aiResult = null;
+  let cands = [];       // AI が出した候補地
+  let groups = [];      // 同じ施設をまとめたもの
+  let selected = null;  // 選んでいるグループ
+  let flyTo = null;     // 一覧から選んだとき、経路が出たら全体が見えるように動かす
+  let sortKey = "popular";
+  let demo = false;
+  let origin = null;    // { lat, lng, label }
+  const routeCache = {}; // key → routes
+  const photoCache = {};
+
+  $("gasUrl").value = storageGet("bs_admin_gas") || cfg.GAS_URL || "";
+  $("adminKey").value = storageGet("bs_admin_key") || "";
+  try { const r = JSON.parse(storageGet("bs_route_cache") || "{}"); Object.assign(routeCache, r); } catch (e) { /* なければ空 */ }
+  function saveRouteCache() { storageSet("bs_route_cache", JSON.stringify(routeCache)); }
+
+  // ---- 読み込み ----
+  $("loadBtn").onclick = async () => {
+    const url = $("gasUrl").value.trim(), key = $("adminKey").value;
+    if (!url) { $("loadMsg").textContent = "GAS の URL を入れてください。"; return; }
+    storageSet("bs_admin_gas", url);
+    storageSet("bs_admin_key", key);
+    $("loadMsg").textContent = "読み込み中…";
+    try {
+      const r = await jsonp(url, { action: "list", key }, 60000);
+      if (!r || !r.ok) throw new Error((r && r.error) || "読み込めませんでした");
+      demo = false;
+      setSpots(r.spots);
+      $("loadMsg").textContent = r.spots.length + "件の回答を読み込みました（" + fmtDate(new Date().toISOString()) + "）";
+      // 前回の AI まとめがあれば表示する（AI は呼ばない）
+      jsonp(url, { action: "lastSummary", key }, 60000).then((x) => { if (x && x.ok && x.result && !aiResult) showAi(x.result); }).catch(() => {});
+    } catch (e) {
+      $("loadMsg").innerHTML = '<span class="err">' + escapeHtml(e.message) + "</span>";
+    }
+  };
+
+  $("demoBtn").onclick = () => {
+    demo = true;
+    aiResult = null; showAi(null);
+    setSpots(makeDemo());
+    $("loadMsg").textContent = "お試しデータを表示しています（写真・所要時間・AIまとめは仮のものです）。";
+  };
+
+  function normName(s) {
+    return String(s || "").normalize("NFKC").toLowerCase().replace(/[\s　・･\-ー（）()「」『』【】]/g, "");
+  }
+  function sameFacility(a, b) {
+    const d = haversine(a.lat, a.lng, b.lat, b.lng);
+    if (d < 0.03) return true;
+    if (d > 0.15) return false;
+    const x = normName(a.spot), y = normName(b.spot);
+    return !!x && !!y && (x === y || x.includes(y) || y.includes(x));
+  }
+  function setSpots(list) {
+    answers = list;
+    spots = list.filter((s) => s.lat != null && s.lng != null && isFinite(s.lat) && isFinite(s.lng));
+    groups = [];
+    for (const s of spots) {
+      const g = groups.find((g) => g.items.some((t) => sameFacility(t, s)));
+      if (g) g.items.push(s); else groups.push({ items: [s] });
+    }
+    groups.forEach((g, i) => {
+      g.key = "g" + i;
+      g.lat = g.items.reduce((a, s) => a + s.lat, 0) / g.items.length;
+      g.lng = g.items.reduce((a, s) => a + s.lng, 0) / g.items.length;
+      g.people = new Set(g.items.map((s) => s.name)).size;
+      // 名前はいちばん多く使われたもの
+      const cnt = {};
+      g.items.forEach((s) => { cnt[s.spot] = (cnt[s.spot] || 0) + 1; });
+      g.title = Object.keys(cnt).sort((a, b) => cnt[b] - cnt[a])[0];
+      g.latest = g.items.reduce((a, s) => (s.time > a ? s.time : a), "");
+    });
+    selected = null;
+    $("detail").classList.add("hidden");
+    routeLayer.clearLayers();
+    $("count").textContent = "（" + answers.length + "件・" + new Set(answers.map((s) => s.name)).size + "人）";
+    drawMarkers();
+    renderList();
+    genreFilter = null;
+    renderWish();
+    $("aiBtn").disabled = !answers.length;
+    if (groups.length) map.fitBounds(L.latLngBounds(groups.map((g) => [g.lat, g.lng])).pad(0.15));
+    updateRouteBtn();
+  }
+
+  function pinIcon(g) {
+    if (g.cand) return L.divIcon({ className: "", html: '<div class="cand-pin' + (g === selected ? " on" : "") + '">' + g.no + "</div>", iconSize: [28, 28], iconAnchor: [14, 14] });
+    return L.divIcon({ className: "", html: '<div class="pin' + (g === selected ? " on" : "") + '">' + g.items.length + "</div>", iconSize: null, iconAnchor: [13, 13] });
+  }
+  function drawMarkers() {
+    cluster.clearLayers();
+    groups.forEach((g) => {
+      const m = L.marker([g.lat, g.lng], { icon: pinIcon(g), title: g.title, count: g.items.length });
+      m.on("click", () => select(g, false));
+      g.marker = m;
+      cluster.addLayer(m);
+    });
+  }
+
+  // ---- 一覧 ----
+  document.querySelectorAll("#sortTabs button").forEach((b) => {
+    b.onclick = () => {
+      sortKey = b.dataset.k;
+      document.querySelectorAll("#sortTabs button").forEach((x) => x.classList.toggle("on", x === b));
+      renderList();
+    };
+  });
+  function routeFor(g) { return origin ? routeCache[routeKey(origin, g)] : null; }
+  function range(routes) {
+    if (!routes || !routes.length) return null;
+    const s = routes.slice().sort((a, b) => a.seconds - b.seconds);
+    return { min: s[0], max: s[s.length - 1] };
+  }
+  function rangeText(rg) {
+    if (!rg) return "";
+    const a = fmtDur(rg.min.seconds), b = fmtDur(rg.max.seconds);
+    return a === b ? a : a + "〜" + b;
+  }
+  function renderList() {
+    const box = $("list");
+    box.innerHTML = "";
+    if (!groups.length) { box.innerHTML = '<div class="muted">スポットはまだありません。</div>'; return; }
+    const arr = groups.slice();
+    if (sortKey === "popular") arr.sort((a, b) => b.people - a.people || b.items.length - a.items.length || (a.latest < b.latest ? 1 : -1));
+    else if (sortKey === "new") arr.sort((a, b) => (a.latest < b.latest ? 1 : -1));
+    else if (sortKey === "near") {
+      const v = (g) => { const rg = range(routeFor(g)); return rg ? rg.min.seconds : (origin ? 1e9 + haversine(origin.lat, origin.lng, g.lat, g.lng) : 1e12); };
+      arr.sort((a, b) => v(a) - v(b));
+    }
+    arr.forEach((g, i) => {
+      const div = document.createElement("div");
+      div.className = "item" + (g === selected ? " on" : "");
+      const thumb = g.items.find((s) => s.thumb);
+      const rg = range(routeFor(g));
+      const names = [...new Set(g.items.map((s) => s.name))];
+      div.innerHTML = (thumb ? '<img src="' + escapeHtml(thumb.thumb) + '" alt="">' : '<div class="noimg"></div>') +
+        '<div class="body"><div class="nm"><span class="rk">' + (i + 1) + "</span>" + escapeHtml(g.title) +
+        (g.people > 1 ? '<span class="badge">' + g.people + "人</span>" : "") + "</div>" +
+        '<div class="st">' + escapeHtml(names.slice(0, 4).join("、") + (names.length > 4 ? " ほか" : "")) + "</div>" +
+        (rg ? '<div class="st">🚌 <span class="time">' + rangeText(rg) + "</span>（" + fmtKm(rg.min.meters) + "〜）</div>" :
+          (origin ? '<div class="st">直線 ' + haversine(origin.lat, origin.lng, g.lat, g.lng).toFixed(1) + "km</div>" : "")) +
+        "</div>";
+      div.onclick = () => select(g, true);
+      box.appendChild(div);
+    });
+  }
+
+  // ---- 詳細 ----
+  function select(g, fly) {
+    const prev = selected;
+    selected = g;
+    if (prev && prev.marker) prev.marker.setIcon(pinIcon(prev));
+    g.marker.setIcon(pinIcon(g));
+    renderList();
+    renderCands();
+    flyTo = fly ? g : null;
+    // アニメーション中は次の移動が無視されるので、ここでは一気に動かす
+    if (fly) map.setView([g.lat, g.lng], Math.max(map.getZoom(), 15), { animate: false });
+    renderDetail();
+    if (origin) loadRoute(g);
+    else routeLayer.clearLayers();
+  }
+  function renderDetail() {
+    const g = selected, d = $("detail");
+    if (!g) { d.classList.add("hidden"); return; }
+    d.classList.remove("hidden");
+    if (g.cand) { renderCandDetail(g, d); return; }
+    let html = '<button class="close" id="closeDetail">×</button><h3>' + escapeHtml(g.title) + "</h3>" +
+      '<div class="muted">' + g.items.length + "件" + (g.people > 1 ? "・" + g.people + "人が希望" : "") + "</div>";
+    html += '<div class="route" id="routeBox">' + routeHtml(g) + "</div>";
+    g.items.forEach((s) => {
+      const hasImg = s.thumb || s.hasPhoto || photoCache[s.id];
+      html += '<div class="entry">' + (hasImg ? '<img data-id="' + escapeHtml(s.id) + '" src="' + escapeHtml(photoCache[s.id] || s.thumb || "") + '" alt="写真">' : "") +
+        '<div><span class="who">' + escapeHtml(s.name) + "</span> さん　<span class=\"muted\">" + fmtDate(s.time) + "</span></div>" +
+        (s.spot !== g.title ? "<div><b>" + escapeHtml(s.spot) + "</b></div>" : "") +
+        (s.wish ? '<div class="desc">したいこと：' + escapeHtml(s.wish) + "</div>" : "") +
+        (s.desc ? '<div class="desc">' + escapeHtml(s.desc) + "</div>" : (s.wish ? "" : '<div class="muted">（説明なし）</div>')) +
+        (s.place ? '<div class="muted">検索した場所：' + escapeHtml(s.place) + "</div>" : "") +
+        '<div class="muted"><a href="https://www.google.com/maps/search/?api=1&query=' + s.lat + "," + s.lng + '" target="_blank">Googleマップで見る</a></div>' +
+        "</div>";
+    });
+    d.innerHTML = html;
+    d.scrollTop = 0;
+    $("closeDetail").onclick = () => {
+      selected = null;
+      g.marker.setIcon(pinIcon(g));
+      d.classList.add("hidden"); routeLayer.clearLayers(); renderList();
+    };
+    d.querySelectorAll("img[data-id]").forEach((img) => {
+      img.onclick = () => openZoom(img.src);
+      loadPhoto(img.dataset.id, img);
+    });
+  }
+  function routeHtml(g) {
+    if (!origin) return '<span class="muted">出発地点を決めると、所要時間が出ます。</span>';
+    const routes = routeFor(g);
+    if (!routes) return '<span class="muted" id="routeWait">所要時間を計算中…</span>';
+    const rg = range(routes);
+    let h = '<div class="muted">' + escapeHtml(origin.label) + " から（渋滞なし・高速あり）" + (demo ? "　※お試しの仮の値" : "") + "</div>" +
+      '<div class="big">🚌 ' + rangeText(rg) + "</div>" +
+      '<div class="muted">距離 ' + (fmtKm(rg.min.meters) === fmtKm(rg.max.meters) ? fmtKm(rg.min.meters) : fmtKm(rg.min.meters) + "〜" + fmtKm(rg.max.meters)) + "</div>";
+    if (routes.length > 1) {
+      h += "<table>";
+      routes.slice().sort((a, b) => a.seconds - b.seconds).forEach((r, i, a) => {
+        const color = i === 0 ? "var(--short)" : (i === a.length - 1 ? "var(--long)" : "#9aa4b2");
+        h += '<tr><td><span class="sw" style="background:' + color + '"></span>' + escapeHtml(r.summary || "ルート" + (i + 1)) +
+          '</td><td class="num">' + fmtDur(r.seconds) + '</td><td class="num">' + fmtKm(r.meters) + "</td></tr>";
+      });
+      h += "</table>";
+    } else {
+      h += '<div class="muted">候補ルートは1本だけでした。</div>';
+    }
+    return h;
+  }
+  function drawRoutes(g) {
+    routeLayer.clearLayers();
+    const routes = routeFor(g);
+    if (!routes || selected !== g) return;
+    const css = getComputedStyle(document.documentElement);
+    const sorted = routes.slice().sort((a, b) => a.seconds - b.seconds);
+    sorted.slice().reverse().forEach((r) => {
+      const i = sorted.indexOf(r);
+      const color = i === 0 ? css.getPropertyValue("--short") : (i === sorted.length - 1 ? css.getPropertyValue("--long") : "#9aa4b2");
+      const pts = r.polyline ? decodePolyline(r.polyline) : [[origin.lat, origin.lng], [g.lat, g.lng]];
+      L.polyline(pts, { color: color.trim(), weight: i === 0 ? 6 : 4, opacity: .85, dashArray: r.polyline ? null : "6 6" }).addTo(routeLayer);
+    });
+    if (flyTo === g) {
+      flyTo = null;
+      const wide = window.innerWidth > 900;
+      map.fitBounds(L.featureGroup(routeLayer.getLayers()).getBounds(), { paddingTopLeft: [40, 40], paddingBottomRight: [wide ? 420 : 40, 40] });
+    }
+  }
+
+  async function loadPhoto(id, img) {
+    if (photoCache[id] || demo) return;
+    const url = $("gasUrl").value.trim();
+    try {
+      const r = await jsonp(url, { action: "photo", key: $("adminKey").value, id }, 60000);
+      if (r && r.ok) { photoCache[id] = r.data; if (img.isConnected) img.src = r.data; }
+    } catch (e) { /* サムネイルのまま */ }
+  }
+  function openZoom(src) {
+    const z = document.createElement("div");
+    z.id = "zoom";
+    z.innerHTML = '<img src="' + escapeHtml(src) + '" alt="">';
+    z.onclick = () => z.remove();
+    document.body.appendChild(z);
+  }
+
+
+  // ---- 表示の切り替え ----
+  document.querySelectorAll("#viewTabs button").forEach((b) => {
+    b.onclick = () => {
+      document.querySelectorAll("#viewTabs button").forEach((x) => x.classList.toggle("on", x === b));
+      ["ai", "wish", "place"].forEach((v) => $("view-" + v).classList.toggle("hidden", v !== b.dataset.v));
+    };
+  });
+
+  // ---- したいこと ----
+  function genresOf(s) { return String(s.genres || "").split(/[、,]/).map((x) => x.trim()).filter(Boolean); }
+  function renderWish() {
+    // ジャンルごとの人数（同じ人は1人）
+    const cnt = {};
+    answers.forEach((s) => genresOf(s).forEach((g) => { (cnt[g] = cnt[g] || new Set()).add(s.name); }));
+    const keys = Object.keys(cnt).sort((a, b) => cnt[b].size - cnt[a].size);
+    const max = keys.length ? cnt[keys[0]].size : 1;
+    const bars = $("genreBars");
+    bars.innerHTML = keys.length ? "" : '<div class="muted">ジャンルを選んだ回答はまだありません。</div>';
+    keys.forEach((g) => {
+      const div = document.createElement("div");
+      div.className = "bar" + (genreFilter === g ? " on" : "");
+      div.innerHTML = '<span class="lb">' + escapeHtml(g) + '</span><span class="tr"><span class="fl" style="display:block;width:' +
+        Math.round(cnt[g].size / max * 100) + '%"></span></span><span class="ct">' + cnt[g].size + "人</span>";
+      div.onclick = () => { genreFilter = genreFilter === g ? null : g; renderWish(); };
+      bars.appendChild(div);
+    });
+    const list = $("wishList");
+    const rows = answers.filter((s) => !genreFilter || genresOf(s).includes(genreFilter))
+      .slice().sort((a, b) => (a.time < b.time ? 1 : -1));
+    list.innerHTML = rows.length ? "" : '<div class="muted">回答はまだありません。</div>';
+    if (genreFilter) list.insertAdjacentHTML("afterbegin", '<div class="muted">「' + escapeHtml(genreFilter) + "」の回答 " + rows.length + "件（もう一度押すと解除）</div>");
+    rows.forEach((s) => {
+      const div = document.createElement("div");
+      div.className = "wish";
+      const hasPos = s.lat != null && isFinite(s.lat);
+      div.innerHTML = '<div><span class="who">' + escapeHtml(s.name) + '</span> <span class="muted">' + fmtDate(s.time) + "</span> " +
+        '<span class="tag mode">' + escapeHtml(s.mode === "まだ決まっていない" ? "まだ決まっていない" : "決まっている") + "</span></div>" +
+        (s.wish ? '<div class="txt">' + escapeHtml(s.wish) + "</div>" : "") +
+        (s.spot ? '<div>📍 <span class="' + (hasPos ? "linkish" : "") + '">' + escapeHtml(s.spot) + "</span></div>" : "") +
+        "<div>" + genresOf(s).map((g) => '<span class="tag">' + escapeHtml(g) + "</span>").join("") + "</div>";
+      const link = div.querySelector(".linkish");
+      if (link) link.onclick = () => { const g = groups.find((g) => g.items.includes(s)); if (g) select(g, true); };
+      list.appendChild(div);
+    });
+  }
+
+  // ---- AI まとめ ----
+  const candLayer = L.layerGroup().addTo(map);
+  $("aiBtn").onclick = async () => {
+    $("aiBtn").disabled = true;
+    $("aiMsg").textContent = "AIがまとめています…（30秒〜1分ほどかかります）";
+    try {
+      let result;
+      if (demo) {
+        await new Promise((r) => setTimeout(r, 600));
+        result = demoAi();
+      } else {
+        const r = await jsonp($("gasUrl").value.trim(), {
+          action: "summarize", key: $("adminKey").value, origin: origin ? origin.label : "", hours: $("hours").value
+        }, 180000);
+        if (!r || !r.ok) throw new Error((r && r.error) || "まとめられませんでした");
+        result = r.result;
+      }
+      showAi(result);
+    } catch (e) {
+      $("aiMsg").innerHTML = '<span class="err">' + escapeHtml(e.message) + "</span>";
+    }
+    $("aiBtn").disabled = !answers.length;
+  };
+  function showAi(result) {
+    aiResult = result;
+    candLayer.clearLayers();
+    if (selected && selected.cand) { selected = null; $("detail").classList.add("hidden"); routeLayer.clearLayers(); }
+    cands = [];
+    const out = $("aiOut");
+    out.innerHTML = "";
+    if (!result) return;
+    $("aiMsg").textContent = fmtDate(result.time) + " に作成（回答" + (result.answers || "?") + "件から）。" +
+      (demo ? "※お試しの仮のまとめです。" : "AIの答えなので、元の回答と見比べて確かめてください。");
+    let h = '<div class="ai-sum">' + escapeHtml(result.summary || "") + "</div>";
+    if (result.groups && result.groups.length) {
+      h += "<h2 style=\"margin-top:12px\">やりたいことのまとまり</h2>";
+      result.groups.forEach((g) => {
+        h += '<div class="ai-group"><b>' + escapeHtml(g.label) + "</b>" + (g.people ? ' <span class="badge">' + escapeHtml(g.people) + "人</span>" : "") +
+          (g.voices || []).map((v) => '<div class="voice">「' + escapeHtml(v) + "」</div>").join("") + "</div>";
+      });
+    }
+    h += '<h2 style="margin-top:12px">行き先の候補</h2><div id="candList"></div>';
+    out.innerHTML = h;
+    (result.candidates || []).forEach((c, i) => {
+      const g = { cand: c, no: i + 1, title: c.name, items: [], lat: Number(c.lat), lng: Number(c.lng), hasPos: c.lat != null && isFinite(c.lat) };
+      if (g.hasPos) {
+        g.marker = L.marker([g.lat, g.lng], { icon: pinIcon(g), zIndexOffset: 500, title: c.name }).addTo(candLayer);
+        g.marker.on("click", () => selectCand(g, false));
+      }
+      cands.push(g);
+    });
+    renderCands();
+    // 出発地点があれば、候補の所要時間を順に出しておく
+    if (origin) (async () => { for (const g of cands) { if (g.hasPos) { try { await fetchRoute(g); } catch (e) { /* 個別に失敗してもよい */ } renderCands(); } } })();
+  }
+  function renderCands() {
+    const box = $("candList");
+    if (!box) return;
+    box.innerHTML = cands.length ? "" : '<div class="muted">候補はありませんでした。</div>';
+    cands.forEach((g) => {
+      const c = g.cand;
+      const rg = g.hasPos ? range(routeFor(g)) : null;
+      const div = document.createElement("div");
+      div.className = "cand-card" + (selected === g ? " on" : "");
+      div.innerHTML = '<div class="nm"><span class="rk" style="color:#7c3aed">' + g.no + "</span> " + escapeHtml(c.name) +
+        (c.people ? ' <span class="badge" style="background:#7c3aed">約' + escapeHtml(c.people) + "人の希望</span>" : "") + "</div>" +
+        '<div class="st">' + escapeHtml(c.area || "") + (rg ? "　🚌 <b>" + rangeText(rg) + "</b>" : "") + (g.hasPos ? "" : "　（地図の位置が見つかりませんでした）") + "</div>" +
+        '<div class="st">' + escapeHtml(c.reason || "") + "</div>";
+      div.onclick = () => selectCand(g, true);
+      box.appendChild(div);
+    });
+  }
+  function selectCand(g, fly) {
+    if (!g.hasPos) {
+      const prev = selected;
+      selected = g; flyTo = null;
+      if (prev && prev.marker) prev.marker.setIcon(pinIcon(prev));
+      routeLayer.clearLayers(); renderDetail(); renderCands(); renderList();
+      return;
+    }
+    select(g, fly);
+  }
+  function renderCandDetail(g, d) {
+    const c = g.cand;
+    let html = '<button class="close" id="closeDetail">×</button><h3><span style="color:#7c3aed">候補' + g.no + "</span> " + escapeHtml(c.name) + "</h3>" +
+      '<div class="muted">' + escapeHtml(c.address || c.area || "") + "</div>";
+    if (g.hasPos) html += '<div class="route" id="routeBox">' + routeHtml(g) + "</div>";
+    html += '<div class="entry"><div class="desc">' + escapeHtml(c.reason || "") + "</div>" +
+      (c.groups && c.groups.length ? "<div>かなえられること：" + c.groups.map((x) => '<span class="tag">' + escapeHtml(x) + "</span>").join("") + "</div>" : "") +
+      (c.people ? '<div class="muted">約' + escapeHtml(c.people) + "人の希望に合います（AIの見立て）</div>" : "") +
+      (c.caution ? '<div class="desc" style="color:var(--gold)">注意：' + escapeHtml(c.caution) + "</div>" : "") +
+      '<div class="muted" style="margin-top:6px"><a href="https://www.google.com/maps/search/?api=1&query=' + encodeURIComponent(c.name + " " + (c.area || "")) + '" target="_blank">Googleマップで見る</a></div></div>';
+    d.innerHTML = html;
+    d.scrollTop = 0;
+    $("closeDetail").onclick = () => {
+      selected = null;
+      if (g.marker) g.marker.setIcon(pinIcon(g));
+      d.classList.add("hidden"); routeLayer.clearLayers(); renderCands();
+    };
+  }
+
+  // ---- 経路 ----
+  function routeKey(o, g) { return [o.lat.toFixed(4), o.lng.toFixed(4), g.lat.toFixed(4), g.lng.toFixed(4)].join(","); }
+  async function fetchRoute(g) {
+    const k = routeKey(origin, g);
+    if (routeCache[k]) return routeCache[k];
+    let routes;
+    if (demo) {
+      // お試し：直線距離から仮の値を作る
+      const km = haversine(origin.lat, origin.lng, g.lat, g.lng);
+      routes = [1.25, 1.4, 1.6].map((f, i) => ({ summary: ["高速ルートA", "高速ルートB", "高速ルートC"][i], meters: km * f * 1000, seconds: (km * f / (75 - i * 12)) * 3600 + 600, polyline: "" }));
+    } else {
+      const r = await jsonp($("gasUrl").value.trim(), {
+        action: "route", key: $("adminKey").value, olat: origin.lat, olng: origin.lng, dlat: g.lat, dlng: g.lng
+      }, 60000);
+      if (!r || !r.ok) throw new Error((r && r.error) || "経路を計算できませんでした");
+      routes = r.routes;
+    }
+    routeCache[k] = routes;
+    if (!demo) saveRouteCache();
+    return routes;
+  }
+  async function loadRoute(g) {
+    try {
+      await fetchRoute(g);
+      if (selected === g) { $("routeBox").innerHTML = routeHtml(g); drawRoutes(g); }
+      renderList();
+    } catch (e) {
+      if (selected === g) $("routeBox").innerHTML = '<span class="err">' + escapeHtml(e.message) + "</span>";
+    }
+  }
+  function updateRouteBtn() { $("allRouteBtn").disabled = !(origin && groups.length); }
+  $("allRouteBtn").onclick = async () => {
+    $("allRouteBtn").disabled = true;
+    let n = 0, fail = 0;
+    for (const g of groups) {
+      n++;
+      $("routeMsg").textContent = "計算中… " + n + " / " + groups.length;
+      try { await fetchRoute(g); } catch (e) { fail++; }
+    }
+    $("routeMsg").textContent = "計算しました" + (fail ? "（" + fail + "件は失敗。時間をおいてもう一度押してください）" : "") + "。「近い順」で並べ替えられます。";
+    renderList();
+    if (selected) { $("routeBox").innerHTML = routeHtml(selected); drawRoutes(selected); }
+    updateRouteBtn();
+  };
+
+  // ---- 出発地点 ----
+  const originIcon = L.divIcon({ className: "", html: '<div class="origin-pin"></div>', iconSize: [18, 18], iconAnchor: [9, 9] });
+  let originMarker = null, picking = false;
+  function setOrigin(lat, lng, label) {
+    origin = { lat, lng, label: label || "選んだ地点" };
+    storageSet("bs_admin_origin", JSON.stringify(origin));
+    if (!originMarker) originMarker = L.marker([lat, lng], { icon: originIcon, zIndexOffset: 1000, title: "出発地点" }).addTo(map);
+    else originMarker.setLatLng([lat, lng]);
+    originMarker.bindTooltip("出発：" + origin.label);
+    $("originMsg").innerHTML = "出発地点：<b>" + escapeHtml(origin.label) + "</b>";
+    $("oresults").innerHTML = "";
+    updateRouteBtn();
+    renderList();
+    if (selected) { renderDetail(); loadRoute(selected); }
+  }
+  try { const o = JSON.parse(storageGet("bs_admin_origin") || "null"); if (o) setOrigin(o.lat, o.lng, o.label); } catch (e) { /* なし */ }
+
+  $("opickBtn").onclick = () => {
+    picking = !picking;
+    $("opickBtn").textContent = picking ? "地図をクリックしてください（やめる）" : "地図をクリックして決める";
+    $("map").style.cursor = picking ? "crosshair" : "";
+  };
+  map.on("click", (e) => {
+    if (!picking) return;
+    picking = false;
+    $("opickBtn").textContent = "地図をクリックして決める";
+    $("map").style.cursor = "";
+    setOrigin(e.latlng.lat, e.latlng.lng, "地図で選んだ地点");
+  });
+
+  async function searchPlaces(q) {
+    const osm = fetch("https://nominatim.openstreetmap.org/search?" + new URLSearchParams({
+      format: "jsonv2", q, countrycodes: "jp", "accept-language": "ja", limit: "6", viewbox: "138.3,37.3,141.1,34.8"
+    })).then((r) => r.json()).then((l) => l.map((x) => ({ title: x.name || String(x.display_name).split(",")[0], sub: String(x.display_name || ""), lat: +x.lat, lng: +x.lon })));
+    const gsi = fetch("https://msearch.gsi.go.jp/address-search/AddressSearch?q=" + encodeURIComponent(q))
+      .then((r) => r.json()).then((l) => l.slice(0, 5).map((x) => ({ title: x.properties.title, sub: "地名・住所", lat: x.geometry.coordinates[1], lng: x.geometry.coordinates[0] })));
+    const res = await Promise.allSettled([osm, gsi]);
+    return res.filter((r) => r.status === "fulfilled").flatMap((r) => r.value).filter((x) => isFinite(x.lat) && isFinite(x.lng));
+  }
+  async function originSearch() {
+    const q = $("oq").value.trim();
+    if (!q) return;
+    $("oresults").innerHTML = '<div class="muted">検索中…</div>';
+    const list = await searchPlaces(q);
+    $("oresults").innerHTML = list.length ? "" : '<div class="muted">見つかりませんでした。地図をクリックして決めることもできます。</div>';
+    list.slice(0, 8).forEach((x) => {
+      const b = document.createElement("button");
+      b.className = "res";
+      b.innerHTML = escapeHtml(x.title) + "<small>" + escapeHtml(x.sub) + "</small>";
+      b.onclick = () => { setOrigin(x.lat, x.lng, x.title); map.setView([x.lat, x.lng], 12); };
+      $("oresults").appendChild(b);
+    });
+  }
+  $("osearchBtn").onclick = originSearch;
+  $("oq").addEventListener("keydown", (e) => { if (e.key === "Enter" && !e.isComposing) originSearch(); });
+
+  // ---- お試しデータ ----
+  function demoPhoto(text, hue, w, h) {
+    const c = document.createElement("canvas");
+    c.width = w; c.height = h;
+    const ctx = c.getContext("2d");
+    const grd = ctx.createLinearGradient(0, 0, w, h);
+    grd.addColorStop(0, "hsl(" + hue + ",60%,55%)");
+    grd.addColorStop(1, "hsl(" + ((hue + 40) % 360) + ",60%,35%)");
+    ctx.fillStyle = grd; ctx.fillRect(0, 0, w, h);
+    ctx.fillStyle = "#fff"; ctx.font = "bold " + Math.round(h / 8) + "px sans-serif"; ctx.textAlign = "center";
+    ctx.fillText(text.slice(0, 8), w / 2, h / 2);
+    return c.toDataURL("image/jpeg", 0.7);
+  }
+  function makeDemo() {
+    const P = [
+      ["鎌倉大仏", 35.3168, 139.5357, "大仏を見て、小町通りで食べ歩きしたい"],
+      ["江ノ島", 35.2994, 139.4800, "島をぐるっと歩きたい。しらす丼！"],
+      ["横浜中華街", 35.4430, 139.6466, "お昼ごはんにちょうどいい"],
+      ["横浜赤レンガ倉庫", 35.4527, 139.6428, ""],
+      ["東京スカイツリー", 35.7101, 139.8107, "展望台に登ってみたい"],
+      ["浅草寺", 35.7148, 139.7967, "雷門で写真を撮りたい"],
+      ["日光東照宮", 36.7581, 139.5989, "遠いけど一度は行ってみたい"],
+      ["華厳の滝", 36.7380, 139.5021, ""],
+      ["あしかがフラワーパーク", 36.3146, 139.5205, "季節の花がきれい"],
+      ["国営ひたち海浜公園", 36.4040, 140.5960, "ネモフィラの丘"],
+      ["成田山新勝寺", 35.7864, 140.3184, "うなぎを食べたい"],
+      ["鴨川シーワールド", 35.1157, 140.1215, "シャチのショー"],
+      ["箱根 大涌谷", 35.2425, 139.0205, "黒たまご"],
+      ["川越 蔵造りの町並み", 35.9254, 139.4826, "小江戸を散歩"],
+      ["高尾山", 35.6251, 139.2436, "みんなでハイキング"]
+    ];
+    const people = ["佐藤", "鈴木", "高橋", "田中", "伊藤", "渡辺", "山本", "中村", "小林", "加藤", "吉田", "山田", "佐々木", "松本", "井上", "木村", "林", "清水", "山崎", "森"];
+    const out = [];
+    let n = 0;
+    const weights = [5, 4, 3, 1, 4, 2, 3, 1, 2, 2, 1, 2, 3, 2, 3];
+    P.forEach((p, i) => {
+      for (let k = 0; k < weights[i]; k++) {
+        const who = people[(n * 7 + i) % people.length];
+        const big = demoPhoto(p[0], (i * 37) % 360, 640, 420);
+        out.push({
+          id: "demo" + (n++), name: who, spot: k === 1 && p[0].length > 3 ? p[0] + "（" + "周辺）" : p[0], desc: k === 0 ? p[3] : "",
+          lat: p[1] + (Math.random() - .5) * 0.0008, lng: p[2] + (Math.random() - .5) * 0.0008, place: p[0],
+          time: new Date(Date.now() - (n * 3600 * 1000)).toISOString(), thumb: demoPhoto(p[0], (i * 37) % 360, 160, 160)
+        });
+        photoCache["demo" + (n - 1)] = big;
+      }
+    });
+    // 場所が決まっていない人の回答
+    const ideas = [
+      ["温泉、グルメ・食べ歩き", "のんびり温泉に入って、おいしいものが食べたい"],
+      ["海・自然", "海を見ながらぼーっとしたい"],
+      ["温泉", ""],
+      ["体を動かす、海・自然", "みんなで体を動かせるところ"],
+      ["グルメ・食べ歩き", "海鮮丼が食べたい"],
+      ["体験（陶芸など）", "何か作って持って帰れる体験がしたい"],
+      ["動物・水族館", "イルカやアシカのショーが見たい"],
+      ["温泉、景色・展望", "景色のいい露天風呂"],
+      ["買い物・アウトレット", "お土産をたくさん買いたい"],
+      ["グルメ・食べ歩き、歴史・お寺", "古い町並みで食べ歩き"],
+      ["海・自然、グルメ・食べ歩き", ""],
+      ["テーマパーク", "乗り物に乗りたい"]
+    ];
+    ideas.forEach((x, i) => {
+      out.push({ id: "idea" + i, name: people[(i * 3 + 5) % people.length], mode: "まだ決まっていない",
+        genres: x[0], wish: x[1], spot: "", desc: "", lat: null, lng: null, time: new Date(Date.now() - i * 1800 * 1000).toISOString() });
+    });
+    out.forEach((s, i) => { if (!s.mode) { s.mode = "決まっている"; if (i % 3 === 0) s.wish = s.desc || "みんなで行ってみたい"; s.hasPhoto = true; } });
+    return out;
+  }
+  function demoAi() {
+    const c = [
+      ["箱根湯本温泉", "神奈川県足柄下郡箱根町", 35.2326, 139.1069, ["温泉でのんびり", "グルメ・食べ歩き"], 14, "温泉と商店街の食べ歩きが一度に楽しめます。大涌谷まで足をのばせば景色も楽しめます。", "週末は道路が混みやすいです"],
+      ["鎌倉・江ノ島", "神奈川県鎌倉市・藤沢市", 35.3092, 139.5020, ["海・自然", "歴史・お寺", "グルメ・食べ歩き"], 16, "大仏や寺社と海辺の散歩、しらす丼などのグルメを組み合わせられます。", "大型バスの駐車場は事前予約が必要です"],
+      ["鴨川シーワールド", "千葉県鴨川市", 35.1157, 140.1215, ["動物・水族館", "海・自然"], 7, "シャチやイルカのショーがあり、海も目の前です。", ""],
+      ["日光", "栃木県日光市", 36.7581, 139.5989, ["歴史・お寺", "景色・展望"], 6, "東照宮と華厳の滝で歴史と自然の両方を楽しめます。", "片道の時間が長めです"],
+      ["御殿場プレミアム・アウトレット", "静岡県御殿場市", 35.3067, 138.9667, ["買い物・アウトレット", "温泉でのんびり"], 5, "買い物と、隣接する日帰り温泉を楽しめます。", "関東からは少し外れます"]
+    ];
+    return {
+      time: new Date().toISOString(), answers: answers.length,
+      summary: "「のんびりしたい」「おいしいものを食べたい」という声がいちばん多く、温泉と食べ歩きの人気が高いです。\n次に海や自然の景色を楽しみたい人が多く、鎌倉・江ノ島や箱根のように、いくつかの希望をまとめてかなえられる場所が向いています。\n少数ですが、体験や水族館を希望する声もあります。",
+      groups: [
+        { label: "温泉でのんびり", people: 9, voices: ["のんびり温泉に入って、おいしいものが食べたい", "景色のいい露天風呂"] },
+        { label: "グルメ・食べ歩き", people: 11, voices: ["海鮮丼が食べたい", "古い町並みで食べ歩き"] },
+        { label: "海・自然", people: 8, voices: ["海を見ながらぼーっとしたい"] },
+        { label: "歴史・お寺", people: 6, voices: ["雷門で写真を撮りたい"] },
+        { label: "動物・水族館", people: 3, voices: ["イルカやアシカのショーが見たい"] }
+      ],
+      candidates: c.map((x) => ({ name: x[0], area: x[1], lat: x[2], lng: x[3], groups: x[4], people: x[5], reason: x[6], caution: x[7] }))
+    };
+  }
+})();
+</script>
+</body>
+</html>
